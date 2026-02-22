@@ -4,6 +4,7 @@ import { asyncHandler } from "../../middleware/asyncHandler";
 import UserService from "../../services/user.service";
 import { ApiValidationError } from "../../services/api-validation-error";
 import ClassService from "../../services/class.service";
+import BookingService from "../../services/booking.service";
 
 const router = Router();
 
@@ -74,6 +75,30 @@ router.get(
       });
     } catch (error) {
       throw new ApiValidationError("Failed to fetch user classes", 500);
+    }
+  })
+);
+
+router.get(
+  "/:userId/bookings",
+  asyncHandler(async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const sedeIdParam = req.query.sedeId;
+      const sedeId = sedeIdParam ? Number(sedeIdParam) : undefined;
+
+      if (sedeIdParam && Number.isNaN(sedeId)) {
+        throw new ApiValidationError("Invalid sedeId", 400);
+      }
+
+      const bookings = await BookingService.getUserBookings(userId, sedeId);
+      res.json({
+        message: "User bookings retrieved successfully",
+        bookings,
+      });
+    } catch (error) {
+      if (error instanceof ApiValidationError) throw error;
+      throw new ApiValidationError("Failed to fetch user bookings", 500);
     }
   })
 );

@@ -368,7 +368,10 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
       statusCode: err.statusCode,
       message: err.message,
     });
-    res.status(err.statusCode).json({ error: err.message });
+    res.status(err.statusCode).json({
+      error: err.message,
+      details: [{ path: "", message: err.message }],
+    });
   } else {
     console.error("[Error Handler] Unexpected error:", err);
     res.status(500).json({

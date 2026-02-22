@@ -1,4 +1,4 @@
-import { Class, PrismaClient } from "@prisma/client";
+import { BookingStatus, Class, PrismaClient } from "@prisma/client";
 import { ApiValidationError } from "./api-validation-error";
 import UserService from "./user.service";
 import PointsService from "./points.service";
@@ -11,40 +11,120 @@ class ClassService {
     this.prisma = new PrismaClient();
   }
 
+  private getRecentClassesStartDate() {
+    const date = new Date();
+    date.setMonth(date.getMonth() - 1);
+    return date;
+  }
+
+  private getClassDateTime(classItem: { date: Date; time: string }) {
+    const dateTime = new Date(classItem.date);
+    const match =
+      typeof classItem.time === "string"
+        ? classItem.time.match(/^(\d{1,2}):(\d{2})/)
+        : null;
+
+    if (!match) return dateTime;
+
+    dateTime.setHours(Number(match[1]), Number(match[2]), 0, 0);
+    return dateTime;
+  }
+
+  private startOfDay(date = new Date()) {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
   async getAllClasses() {
-    const today = new Date();
-    return this.prisma.class.findMany({
+    const now = new Date();
+    const classes = await this.prisma.class.findMany({
       where: {
         date: {
-          gte: today,
+          gte: this.startOfDay(now),
         },
       },
+      orderBy: [{ date: "asc" }, { time: "asc" }],
     });
+
+    return classes.filter((cls) => this.getClassDateTime(cls) >= now);
   }
 
   async getAllClassesBySedeId(sedeId: number) {
-    const today = new Date();
+    const now = new Date();
 
     const classes = await this.prisma.class.findMany({
-      where: { sedeId, date: { gte: today } },
+      where: { sedeId, date: { gte: this.startOfDay(now) } },
+      orderBy: [{ date: "asc" }, { time: "asc" }],
     });
 
-    return classes;
+    return classes.filter((cls) => this.getClassDateTime(cls) >= now);
+  }
+
+  async getRecentAndFutureClassesBySedeId(sedeId: number) {
+    const recentClassesStart = this.getRecentClassesStartDate();
+    const classes = await this.prisma.class.findMany({
+      where: { sedeId, date: { gte: this.startOfDay(recentClassesStart) } },
+      orderBy: [{ date: "asc" }, { time: "asc" }],
+    });
+
+    return classes.filter(
+      (cls) => this.getClassDateTime(cls) >= recentClassesStart
+    );
+  }
+
+  async getPendingAttendanceClassesBySedeId(sedeId: number) {
+    const now = new Date();
+    const recentClassesStart = this.getRecentClassesStartDate();
+    const classes = await this.prisma.class.findMany({
+      where: {
+        sedeId,
+        date: { gte: this.startOfDay(recentClassesStart) },
+        bookings: {
+          some: {
+            status: BookingStatus.RESERVED,
+          },
+        },
+      },
+      orderBy: [{ date: "asc" }, { time: "asc" }],
+    });
+
+    return classes.filter((cls) => {
+      const classDateTime = this.getClassDateTime(cls);
+      return classDateTime >= recentClassesStart && classDateTime <= now;
+    });
   }
 
   async getClassById(id: number) {
+    
     return this.prisma.class.findUnique({ where: { id } });
   }
 
   async getClassByUserId(userId: string) {
-    return this.prisma.class.findMany({
+    const recentClassesStart = this.getRecentClassesStartDate();
+    const classes = await this.prisma.class.findMany({
       where: {
         bookings: {
-          some: { userId, status: "RESERVED" },
+          some: {
+            userId,
+            status: {
+              in: [
+                BookingStatus.RESERVED,
+                BookingStatus.ATTENDED,
+                BookingStatus.ABSENT,
+                BookingStatus.CANCELLED,
+              ],
+            },
+          },
         },
-        date: { gte: new Date() },
+        date: { gte: this.startOfDay(recentClassesStart) },
       },
+      orderBy: [{ date: "asc" }, { time: "asc" }],
     });
+
+    return classes.filter(
+      (cls) => this.getClassDateTime(cls) >= recentClassesStart
+    );
   }
 
   private async getFutureClassCount(userId: string): Promise<number> {
@@ -101,7 +181,8 @@ class ClassService {
     }
   }
   async unenrollClass(userId: string, classId: number) {
-    const updated = await BookingService.cancelBookingFromUnenroll(
+    const { updatedClass: updated, promotionAlert } =
+      await BookingService.cancelBookingFromUnenroll(
       userId,
       classId,
     );
@@ -115,7 +196,7 @@ class ClassService {
     } catch {
       // noop
     }
-    return updated;
+    return { updated, promotionAlert };
   }
   async listNamesWithEnrollCount(
     upcoming = false,

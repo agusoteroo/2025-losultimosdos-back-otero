@@ -22,6 +22,7 @@ import ActivityService from "../../services/activity.service";
 import BookingService from "../../services/booking.service";
 import {
   bookingIdParamSchema,
+  classIdParamSchema as bookingClassIdParamSchema,
   waitlistSchema,
 } from "../../schemas/booking.schema";
 
@@ -63,8 +64,12 @@ router.post(
       throw new ApiValidationError("Unauthorized", 401);
     }
 
-    const updatedClass = await ClassService.unenrollClass(userId, classId);
-    res.json({ message: "Unenrolled successfully", class: updatedClass });
+    const result = await ClassService.unenrollClass(userId, classId);
+    res.json({
+      message: "Unenrolled successfully",
+      class: result.updated,
+      waitlistPromotion: result.promotionAlert,
+    });
   })
 );
 router.get(
@@ -95,7 +100,7 @@ router.get(
     }
 
     const policy = await BookingService.getNoShowPolicy(userId);
-    res.json(policy);
+    res.json({ policy });
   })
 );
 
@@ -128,6 +133,40 @@ router.post(
     const entry = await BookingService.joinWaitlist(userId, classId);
 
     res.status(201).json({ message: "Te anotaste en lista de espera", entry });
+  })
+);
+
+router.get(
+  "/bookings/waitlist",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { userId } = getAuth(req);
+    if (!userId) {
+      throw new ApiValidationError("Unauthorized", 401);
+    }
+
+    const sedeIdParam = req.query.sedeId;
+    const sedeId = sedeIdParam ? Number(sedeIdParam) : undefined;
+    if (sedeIdParam && Number.isNaN(sedeId)) {
+      throw new ApiValidationError("Invalid sedeId", 400);
+    }
+
+    const entries = await BookingService.getUserWaitlistEntries(userId, sedeId);
+    res.json({ items: entries });
+  })
+);
+
+router.delete(
+  "/bookings/waitlist/:classId",
+  validateParams(bookingClassIdParamSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { userId } = getAuth(req);
+    if (!userId) {
+      throw new ApiValidationError("Unauthorized", 401);
+    }
+
+    const classId = Number(req.params.classId);
+    const result = await BookingService.leaveWaitlist(userId, classId);
+    res.status(200).json({ message: "Saliste de la lista de espera", entry: result });
   })
 );
 

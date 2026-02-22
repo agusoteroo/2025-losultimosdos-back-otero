@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { getAuth } from "@clerk/express";
+import { BookingStatus } from "@prisma/client";
 import { ClassInput } from "../../types/class";
 import { validateBody, validateParams } from "../../middleware/validation";
 import {
@@ -12,8 +13,22 @@ import ClassService from "../../services/class.service";
 import { ApiValidationError } from "../../services/api-validation-error";
 import { asyncHandler } from "../../middleware/asyncHandler";
 import BookingService from "../../services/booking.service";
+import UserService from "../../services/user.service";
 
 const router = Router();
+router.get(
+  "/",
+  asyncHandler(async (req: Request, res: Response) => {
+    const sedeId = Number(req.query.sedeId);
+    if (!sedeId) {
+      throw new ApiValidationError("Sede ID is required", 400);
+    }
+
+    const classes = await ClassService.getPendingAttendanceClassesBySedeId(sedeId);
+    res.json({ classes });
+  })
+);
+
 router.post(
   "/",
   validateBody(classInputSchema),
@@ -54,8 +69,66 @@ router.get(
   validateParams(bookingClassIdParamSchema),
   asyncHandler(async (req: Request, res: Response) => {
     const classId = Number(req.params.classId);
-    const bookings = await BookingService.getClassBookings(classId);
-    res.json({ bookings });
+    const statusParam = req.query.status;
+    let status: BookingStatus | undefined;
+
+    if (typeof statusParam === "string" && statusParam.trim() !== "") {
+      if (!Object.values(BookingStatus).includes(statusParam as BookingStatus)) {
+        throw new ApiValidationError("Invalid booking status", 400);
+      }
+      status = statusParam as BookingStatus;
+    }
+
+    const bookings = await BookingService.getClassBookings(classId, status);
+
+    const uniqueUserIds = Array.from(new Set(bookings.map((b) => b.userId)));
+    const userResults = await Promise.allSettled(
+      uniqueUserIds.map(async (userId) => {
+        const user = await UserService.getUserById(userId);
+        const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
+        return [
+          userId,
+          {
+            id: user.id,
+            firstName: user.firstName ?? null,
+            lastName: user.lastName ?? null,
+            fullName: fullName || user.email || user.id,
+            email: user.email ?? null,
+          },
+        ] as const;
+      })
+    );
+
+    const usersById = new Map<
+      string,
+      {
+        id: string;
+        firstName: string | null;
+        lastName: string | null;
+        fullName: string;
+        email: string | null;
+      }
+    >();
+
+    for (const result of userResults) {
+      if (result.status === "fulfilled") {
+        usersById.set(result.value[0], result.value[1]);
+      }
+    }
+
+    const bookingsWithUser = bookings.map((booking) => ({
+      ...booking,
+      user:
+        usersById.get(booking.userId) ?? {
+          id: booking.userId,
+          firstName: null,
+          lastName: null,
+          fullName: booking.userId,
+          email: null,
+        },
+    }));
+
+    res.json({ bookings: bookingsWithUser });
   })
 );
 router.put(
@@ -138,8 +211,12 @@ router.post(
     const { id } = req.params;
     const { userId } = req.body as { userId: string };
 
-    const updatedClass = await ClassService.unenrollClass(userId, parseInt(id));
-    res.json({ message: "Class unenrolled successfully", class: updatedClass });
+    const result = await ClassService.unenrollClass(userId, parseInt(id));
+    res.json({
+      message: "Class unenrolled successfully",
+      class: result.updated,
+      waitlistPromotion: result.promotionAlert,
+    });
   })
 );
 

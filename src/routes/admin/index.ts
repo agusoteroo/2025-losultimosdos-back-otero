@@ -42,7 +42,10 @@ router.put(
     const bookingId = Number(req.params.bookingId);
     const status = req.body.status as BookingStatus;
 
-    const booking = await BookingService.updateBookingStatus(bookingId, status);
+    const booking = await BookingService.updateAttendanceStatusByAdmin(
+      bookingId,
+      status
+    );
     res.json({ message: "Booking updated", booking });
   })
 );
