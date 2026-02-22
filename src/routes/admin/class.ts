@@ -7,9 +7,11 @@ import {
   classIdParamSchema,
   enrollmentSchema,
 } from "../../schemas/class.schema";
+import { classIdParamSchema as bookingClassIdParamSchema } from "../../schemas/booking.schema";
 import ClassService from "../../services/class.service";
 import { ApiValidationError } from "../../services/api-validation-error";
 import { asyncHandler } from "../../middleware/asyncHandler";
+import BookingService from "../../services/booking.service";
 
 const router = Router();
 router.post(
@@ -47,7 +49,15 @@ router.post(
     res.json({ message: "Class created successfully", class: newClass });
   })
 );
-
+router.get(
+  "/:classId/bookings",
+  validateParams(bookingClassIdParamSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const classId = Number(req.params.classId);
+    const bookings = await BookingService.getClassBookings(classId);
+    res.json({ bookings });
+  })
+);
 router.put(
   "/:id",
   validateParams(classIdParamSchema),

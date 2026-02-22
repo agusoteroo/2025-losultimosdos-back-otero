@@ -3,7 +3,7 @@ import { getAuth } from "@clerk/express";
 import { ApiValidationError } from "../../services/api-validation-error";
 import checkUserRole from "../../middleware/user";
 import { ClassEnrollment } from "../../types/class";
-import { validateBody } from "../../middleware/validation";
+import { validateBody, validateParams } from "../../middleware/validation";
 import { classEnrollmentSchema } from "../../schemas/class.schema";
 import ClassService from "../../services/class.service";
 import UserService from "../../services/user.service";
@@ -17,8 +17,13 @@ import {
 } from "@prisma/client";
 import ExercisePerformanceService from "../../services/exercisePerformance.service";
 import PointsService from "../../services/points.service";
-import ChallengeService from "../../services/challenge.service"; // 👈 nuevo
+import ChallengeService from "../../services/challenge.service"; 
 import ActivityService from "../../services/activity.service";
+import BookingService from "../../services/booking.service";
+import {
+  bookingIdParamSchema,
+  waitlistSchema,
+} from "../../schemas/booking.schema";
 
 const router = Router();
 const prisma = new PrismaClient(); // 👈 para el calendario
@@ -60,6 +65,69 @@ router.post(
 
     const updatedClass = await ClassService.unenrollClass(userId, classId);
     res.json({ message: "Unenrolled successfully", class: updatedClass });
+  })
+);
+router.get(
+  "/bookings",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { userId } = getAuth(req);
+    if (!userId) {
+      throw new ApiValidationError("Unauthorized", 401);
+    }
+
+    const sedeIdParam = req.query.sedeId;
+    const sedeId = sedeIdParam ? Number(sedeIdParam) : undefined;
+    if (sedeIdParam && Number.isNaN(sedeId)) {
+      throw new ApiValidationError("Invalid sedeId", 400);
+    }
+
+    const items = await BookingService.getUserBookings(userId, sedeId);
+    res.json({ items });
+  })
+);
+
+router.get(
+  "/bookings/no-show-policy",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { userId } = getAuth(req);
+    if (!userId) {
+      throw new ApiValidationError("Unauthorized", 401);
+    }
+
+    const policy = await BookingService.getNoShowPolicy(userId);
+    res.json(policy);
+  })
+);
+
+router.post(
+  "/bookings/:bookingId/check-in",
+  validateParams(bookingIdParamSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { userId } = getAuth(req);
+    if (!userId) {
+      throw new ApiValidationError("Unauthorized", 401);
+    }
+
+    const bookingId = Number(req.params.bookingId);
+    const booking = await BookingService.checkIn(userId, bookingId);
+
+    res.status(200).json({ message: "Check-in registrado", booking });
+  })
+);
+
+router.post(
+  "/bookings/waitlist",
+  validateBody(waitlistSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { userId } = getAuth(req);
+    if (!userId) {
+      throw new ApiValidationError("Unauthorized", 401);
+    }
+
+    const { classId } = req.body as { classId: number };
+    const entry = await BookingService.joinWaitlist(userId, classId);
+
+    res.status(201).json({ message: "Te anotaste en lista de espera", entry });
   })
 );
 

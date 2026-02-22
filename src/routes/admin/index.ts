@@ -7,9 +7,11 @@ import excersicesRoutes from "./excersices";
 import routinesRoutes from "./routines";
 import goalsRoutes from "./goals";
 import { asyncHandler } from "../../middleware/asyncHandler";
-import { validateBody } from "../../middleware/validation";
+import { validateBody, validateParams } from "../../middleware/validation";
 import { sedeCreateSchema } from "../../schemas/sede.schema";
-import { PrismaClient } from "@prisma/client";
+import { BookingStatus, PrismaClient } from "@prisma/client";
+import BookingService from "../../services/booking.service";
+import { bookingIdParamSchema, bookingStatusSchema } from "../../schemas/booking.schema";
 
 const router = Router();
 
@@ -30,6 +32,18 @@ router.post(
       data: { name, address, latitude, longitude },
     });
     res.json({ message: "Sede created successfully", sede });
+  })
+);
+router.put(
+  "/bookings/:bookingId/status",
+  validateParams(bookingIdParamSchema),
+  validateBody(bookingStatusSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const bookingId = Number(req.params.bookingId);
+    const status = req.body.status as BookingStatus;
+
+    const booking = await BookingService.updateBookingStatus(bookingId, status);
+    res.json({ message: "Booking updated", booking });
   })
 );
 

@@ -23,7 +23,7 @@
     "@prisma/client": "^6.16.0",
     "@types/bcrypt": "^6.0.0",
     "bcrypt": "^6.0.0",
-    "cors": "^2.8.5",
+    "cors": "^2.8.6",
     "dotenv": "^17.2.2",
     "express": "^4.17.1",
     "express-rate-limit": "^8.2.1",

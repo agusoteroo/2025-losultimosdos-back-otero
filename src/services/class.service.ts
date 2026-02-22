@@ -4,6 +4,7 @@ import UserService from "./user.service";
 import PointsService from "./points.service";
 import { PointEventType } from "@prisma/client";
 import BadgeService from "./badge.service";
+import BookingService from "./booking.service";
 class ClassService {
   private readonly prisma: PrismaClient;
   constructor() {
@@ -37,15 +38,21 @@ class ClassService {
 
   async getClassByUserId(userId: string) {
     return this.prisma.class.findMany({
-      where: { users: { has: userId }, date: { gte: new Date() } },
+      where: {
+        bookings: {
+          some: { userId, status: "RESERVED" },
+        },
+        date: { gte: new Date() },
+      },
     });
   }
 
   private async getFutureClassCount(userId: string): Promise<number> {
-    const classes = await this.prisma.class.count({
+    const classes = await this.prisma.booking.count({
       where: {
-        users: { has: userId },
-        date: { gte: new Date() },
+        userId,
+        status: "RESERVED",
+        class: { date: { gte: new Date() } },
       },
     });
     return classes;
@@ -77,76 +84,41 @@ class ClassService {
   }
 
   async enrollClass(userId: string, classId: number) {
-    const [classData, user] = await Promise.all([
-      this.getClassById(classId),
-      UserService.getUserById(userId),
-    ]);
-
-    if (!(await UserService.hasMedicalCheck(userId))) {
-      throw new ApiValidationError("User does not have a medical check", 421);
-    }
-    if (!classData) {
-      throw new ApiValidationError("Class not found", 404);
-    }
-    if (classData.users.includes(userId)) {
-      throw new ApiValidationError("Already enrolled in this class", 400);
-    }
-    if (classData.enrolled >= classData.capacity) {
-      throw new ApiValidationError("Class is full", 400);
-    }
-
-    if (user.plan === "basic") {
-      const futureClassCount = await this.getFutureClassCount(userId);
-      if (futureClassCount >= 3) {
-        throw new ApiValidationError(
-          "Los usuarios del plan básico solo pueden inscribirse hasta en 3 clases futuras.",
-          403
-        );
-      }
-    }
-
-    const updated = await this.prisma.class.update({
-      where: { id: classId },
-      data: { users: { push: userId }, enrolled: { increment: 1 } },
-    });
-
-    const event = await PointsService.registerEvent({
+    const { updatedClass: updated } = await BookingService.createBookingFromEnroll(
       userId,
-      sedeId: updated.sedeId,
-      type: PointEventType.CLASS_ENROLL,
-      classId: updated.id,
-    });
-
-    return { updated, pointsAwarded: event.points };
+      classId,
+    );
+    try {
+      const event = await PointsService.registerEvent({
+        userId,
+        sedeId: updated.sedeId,
+        type: PointEventType.CLASS_ENROLL,
+        classId: updated.id,
+      });
+      return { updated, pointsAwarded: event.points };
+    } catch {
+      return { updated, pointsAwarded: 0 };
+    }
   }
-
   async unenrollClass(userId: string, classId: number) {
-    const classData = await this.getClassById(classId);
-    if (!classData) {
-      throw new ApiValidationError("Class not found", 404);
+    const updated = await BookingService.cancelBookingFromUnenroll(
+      userId,
+      classId,
+    );
+    try {
+      await PointsService.removeClassEnrollEvent(userId, classId);
+    } catch {
+      // noop
     }
-    const wasEnrolled = classData.users.includes(userId);
-    if (!wasEnrolled) {
-      throw new ApiValidationError("Not enrolled in this class", 400);
+    try {
+      await BadgeService.evaluateForUser(userId, updated.sedeId);
+    } catch {
+      // noop
     }
-    const newUsers = classData.users.filter((user) => user !== userId);
-
-    const updated = await this.prisma.class.update({
-      where: { id: classId },
-      data: {
-        users: { set: newUsers },
-        enrolled: wasEnrolled ? { decrement: 1 } : undefined,
-      },
-    });
-
-    await PointsService.removeClassEnrollEvent(userId, classId);
-
-    await BadgeService.evaluateForUser(userId, classData.sedeId);
     return updated;
   }
-
   async listNamesWithEnrollCount(
-    upcoming = false
+    upcoming = false,
   ): Promise<
     { name: string; enrollCount: number; sede: { id: number; name: string } }[]
   > {
