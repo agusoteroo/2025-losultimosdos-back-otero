@@ -75,6 +75,18 @@ model UserNoShowMonthly {
   @@index([userId])
 }
 
+model UserBookingPenalty {
+  id              Int      @id @default(autoincrement())
+  userId          String   @unique
+  strikes         Int      @default(0)
+  restrictedUntil DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+  @@index([restrictedUntil])
+}
+
 model MuscleGroup {
   id        Int        @id @default(autoincrement())
   name      String     @unique

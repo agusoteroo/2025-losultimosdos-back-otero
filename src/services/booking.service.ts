@@ -76,94 +76,17 @@ class BookingService {
   }
 
   private async getBookingStrikeSummary(userId: string, now = new Date()) {
-    const lookbackStart = this.addMinutes(
-      now,
-      -(NO_SHOW_POLICY.restrictionMinutes * 3)
-    );
-    const bookings = await this.prisma.booking.findMany({
-      where: {
-        userId,
-        status: { in: [BookingStatus.ABSENT, BookingStatus.CANCELLED] },
-        class: {
-          date: { gte: lookbackStart },
-        },
-      },
-      include: {
-        class: {
-          select: {
-            id: true,
-            date: true,
-            time: true,
-          },
-        },
-      },
-      orderBy: [{ updatedAt: "asc" }],
+    const penalty = await this.prisma.userBookingPenalty.findUnique({
+      where: { userId },
     });
-
-    const strikeEvents = bookings
-      .map((booking) => {
-        if (booking.status === BookingStatus.ABSENT) {
-          return {
-            bookingId: booking.id,
-            classId: booking.classId,
-            type: "ABSENT" as const,
-            strikeAt: booking.updatedAt,
-          };
-        }
-
-        if (
-          booking.status === BookingStatus.CANCELLED &&
-          this.isLateCancellation(booking, booking.class)
-        ) {
-          return {
-            bookingId: booking.id,
-            classId: booking.classId,
-            type: "LATE_CANCEL" as const,
-            strikeAt: booking.cancelledAt!,
-          };
-        }
-
-        return null;
-      })
-      .filter((x): x is NonNullable<typeof x> => x !== null)
-      .sort((a, b) => a.strikeAt.getTime() - b.strikeAt.getTime());
-
-    const windowMs = NO_SHOW_POLICY.restrictionMinutes * 60 * 1000;
-    const queue: Date[] = [];
-    let restrictionUntil: Date | null = null;
-
-    for (const event of strikeEvents) {
-      queue.push(event.strikeAt);
-
-      while (
-        queue.length > 0 &&
-        event.strikeAt.getTime() - queue[0].getTime() > windowMs
-      ) {
-        queue.shift();
-      }
-
-      if (queue.length >= NO_SHOW_POLICY.restrictedAt) {
-        const candidateUntil = this.addMinutes(
-          event.strikeAt,
-          NO_SHOW_POLICY.restrictionMinutes
-        );
-        if (!restrictionUntil || candidateUntil > restrictionUntil) {
-          restrictionUntil = candidateUntil;
-        }
-      }
-    }
-
     const activeRestriction =
-      restrictionUntil && restrictionUntil.getTime() > now.getTime()
-        ? restrictionUntil
+      penalty?.restrictedUntil && penalty.restrictedUntil.getTime() > now.getTime()
+        ? penalty.restrictedUntil
         : null;
-
-    const strikesInWindow = strikeEvents.filter(
-      (e) => now.getTime() - e.strikeAt.getTime() <= windowMs
-    ).length;
+    const strikesInWindow = penalty?.strikes ?? 0;
 
     return {
-      strikeEvents,
+      strikeEvents: [],
       strikesInWindow,
       restricted: Boolean(activeRestriction),
       restrictionUntil: activeRestriction,
@@ -610,12 +533,38 @@ class BookingService {
 
   private async increaseNoShowCounter(userId: string, when: Date, tx?: PrismaClient | any) {
     const client = tx ?? this.prisma;
-    const { start } = this.getMonthRange(when);
+    const existing = await client.userBookingPenalty.upsert({
+      where: { userId },
+      create: { userId, strikes: 0, restrictedUntil: null },
+      update: {},
+    });
 
-    await client.userNoShowMonthly.upsert({
-      where: { userId_monthStart: { userId, monthStart: start } },
-      create: { userId, monthStart: start, count: 1 },
-      update: { count: { increment: 1 } },
+    if (
+      existing.restrictedUntil &&
+      new Date(existing.restrictedUntil).getTime() > when.getTime()
+    ) {
+      return;
+    }
+
+    const nextStrikes = (existing.strikes ?? 0) + 1;
+
+    if (nextStrikes >= NO_SHOW_POLICY.restrictedAt) {
+      await client.userBookingPenalty.update({
+        where: { userId },
+        data: {
+          strikes: 0,
+          restrictedUntil: this.addMinutes(when, NO_SHOW_POLICY.restrictionMinutes),
+        },
+      });
+      return;
+    }
+
+    await client.userBookingPenalty.update({
+      where: { userId },
+      data: {
+        strikes: nextStrikes,
+        restrictedUntil: null,
+      },
     });
   }
 
@@ -662,7 +611,7 @@ class BookingService {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const booking = await tx.booking.findUnique({
         where: { id: bookingId },
         include: { class: true },
@@ -697,13 +646,36 @@ class BookingService {
       });
 
       if (status === BookingStatus.ABSENT && booking.status !== BookingStatus.ABSENT) {
-        await this.increaseNoShowCounter(booking.userId, classStart, tx);
+        await this.increaseNoShowCounter(booking.userId, updated.updatedAt, tx);
       }
 
       await this.syncClassEnrollment(booking.classId, tx);
 
       return updated;
     });
+
+    let strikeAlert: null | {
+      type: "ABSENT_STRIKE";
+      userId: string;
+      strikes: number;
+      threshold: number;
+      isRestricted: boolean;
+      restrictionUntil: Date | null;
+    } = null;
+
+    if (status === BookingStatus.ABSENT) {
+      const summary = await this.getBookingStrikeSummary(result.userId);
+      strikeAlert = {
+        type: "ABSENT_STRIKE",
+        userId: result.userId,
+        strikes: summary.strikesInWindow,
+        threshold: NO_SHOW_POLICY.restrictedAt,
+        isRestricted: summary.restricted,
+        restrictionUntil: summary.restrictionUntil,
+      };
+    }
+
+    return { updated: result, strikeAlert };
   }
 }
 
