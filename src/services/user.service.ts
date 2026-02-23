@@ -134,10 +134,7 @@ class UserService {
     }
 
     try {
-      console.log(
-        "Checking medical check",
-        user.emailAddresses[0]?.emailAddress
-      );
+      console.log("Checking medical check for user", { userId });
       const response = await fetch(
         `${process.env.MEDIBOOK_PUBLIC_URL}/health-certificate`,
         {
@@ -154,7 +151,7 @@ class UserService {
       const data = await response.json();
 
       if (data.hasHealthCertificate) {
-        console.log("User has health certificate");
+        console.log("User has health certificate", { userId });
         await clerkClient.users.updateUser(userId, {
           publicMetadata: { ...user.publicMetadata, medicalCheck: true },
         });
@@ -162,7 +159,8 @@ class UserService {
       }
       return false;
     } catch (error) {
-      console.log("Error checking medical check", error);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      console.log("Error checking medical check", { userId, message });
       return false;
     }
   }

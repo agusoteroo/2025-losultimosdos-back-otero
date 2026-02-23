@@ -21,6 +21,70 @@ model Class {
   sede               Sede     @relation(fields: [sedeId], references: [id])
   goals              Goal[]
   isBoostedForPoints Boolean  @default(false)
+   bookings           Booking[]
+  waitlistEntries    WaitlistEntry[]
+}
+
+
+enum BookingStatus {
+  RESERVED
+  ATTENDED
+  ABSENT
+  CANCELLED
+  WAITLIST
+}
+
+model Booking {
+  id                     Int           @id @default(autoincrement())
+  classId                Int
+  userId                 String
+  status                 BookingStatus @default(RESERVED)
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+  checkedInAt            DateTime?
+  cancelledAt            DateTime?
+  promotedFromWaitlistAt DateTime?
+
+  class Class @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([classId, status])
+}
+
+model WaitlistEntry {
+  id        Int      @id @default(autoincrement())
+  classId   Int
+  userId    String
+  createdAt DateTime @default(now())
+
+  class Class @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@unique([classId, userId])
+  @@index([classId, createdAt])
+}
+
+model UserNoShowMonthly {
+  id         Int      @id @default(autoincrement())
+  userId     String
+  monthStart DateTime
+  count      Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, monthStart])
+  @@index([userId])
+}
+
+model UserBookingPenalty {
+  id              Int      @id @default(autoincrement())
+  userId          String   @unique
+  strikes         Int      @default(0)
+  restrictedUntil DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+  @@index([restrictedUntil])
 }
 
 model MuscleGroup {
