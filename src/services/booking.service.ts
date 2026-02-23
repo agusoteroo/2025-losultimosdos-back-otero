@@ -235,6 +235,7 @@ class BookingService {
       const isLateCancellation =
         classStart.getTime() - now.getTime() <
         NO_SHOW_POLICY.cancellationWindowHours * 60 * 60 * 1000;
+      let lateCancellationStrikeApplied = false;
 
       if (isLateCancellation) {
         await tx.booking.update({
@@ -243,6 +244,7 @@ class BookingService {
         });
 
         await this.increaseNoShowCounter(userId, now, tx);
+        lateCancellationStrikeApplied = true;
       } else {
         await tx.booking.delete({
           where: { id: booking.id },
@@ -253,14 +255,35 @@ class BookingService {
       await this.syncClassEnrollment(classId, tx);
 
       const updatedClass = await tx.class.findUniqueOrThrow({ where: { id: classId } });
-      return { updatedClass, promotedBooking };
+      return { updatedClass, promotedBooking, lateCancellationStrikeApplied };
     });
 
     const promotionAlert = await this.awardPointsForPromotedWaitlistBooking(
       result.promotedBooking
     );
 
-    return { updatedClass: result.updatedClass, promotionAlert };
+    let strikeAlert: null | {
+      type: "LATE_CANCELLATION_STRIKE";
+      userId: string;
+      strikes: number;
+      threshold: number;
+      isRestricted: boolean;
+      restrictionUntil: Date | null;
+    } = null;
+
+    if (result.lateCancellationStrikeApplied) {
+      const summary = await this.getBookingStrikeSummary(userId);
+      strikeAlert = {
+        type: "LATE_CANCELLATION_STRIKE",
+        userId,
+        strikes: summary.strikesInWindow,
+        threshold: NO_SHOW_POLICY.restrictedAt,
+        isRestricted: summary.restricted,
+        restrictionUntil: summary.restrictionUntil,
+      };
+    }
+
+    return { updatedClass: result.updatedClass, promotionAlert, strikeAlert };
   }
 
   private async promoteWaitlistIfPossible(classId: number, tx?: PrismaClient | any) {

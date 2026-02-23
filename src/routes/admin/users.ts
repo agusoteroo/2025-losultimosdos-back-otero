@@ -68,12 +68,20 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     try {
       const { userId } = req.params;
-      const classes = await ClassService.getClassByUserId(userId);
+      const sedeIdParam = req.query.sedeId;
+      const sedeId = sedeIdParam ? Number(sedeIdParam) : undefined;
+
+      if (sedeIdParam && Number.isNaN(sedeId)) {
+        throw new ApiValidationError("Invalid sedeId", 400);
+      }
+
+      const classes = await ClassService.getActiveClassesByUserId(userId, sedeId);
       res.json({
         message: "User classes retrieved successfully",
         classes,
       });
     } catch (error) {
+      if (error instanceof ApiValidationError) throw error;
       throw new ApiValidationError("Failed to fetch user classes", 500);
     }
   })

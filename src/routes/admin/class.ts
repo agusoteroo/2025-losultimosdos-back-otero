@@ -216,6 +216,7 @@ router.post(
       message: "Class unenrolled successfully",
       class: result.updated,
       waitlistPromotion: result.promotionAlert,
+      strikeAlert: result.strikeAlert,
     });
   })
 );

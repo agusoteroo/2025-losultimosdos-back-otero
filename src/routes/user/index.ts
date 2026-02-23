@@ -69,6 +69,7 @@ router.post(
       message: "Unenrolled successfully",
       class: result.updated,
       waitlistPromotion: result.promotionAlert,
+      strikeAlert: result.strikeAlert,
     });
   })
 );
