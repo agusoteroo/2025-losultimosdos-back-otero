@@ -7,8 +7,14 @@ import BadgeService from "./badge.service";
 import BookingService from "./booking.service";
 class ClassService {
   private readonly prisma: PrismaClient;
+  private readonly basicPlanMaxReservedClasses: number;
   constructor() {
     this.prisma = new PrismaClient();
+    const configuredLimit = Number(process.env.BASIC_MAX_RESERVED_CLASSES);
+    this.basicPlanMaxReservedClasses =
+      Number.isFinite(configuredLimit) && configuredLimit > 0
+        ? configuredLimit
+        : 2;
   }
 
   private getRecentClassesStartDate() {
@@ -196,6 +202,17 @@ class ClassService {
   }
 
   async enrollClass(userId: string, classId: number) {
+    const user = await UserService.getUserById(userId);
+    if (user.plan === "basic") {
+      const futureReservedCount = await this.getFutureClassCount(userId);
+      if (futureReservedCount >= this.basicPlanMaxReservedClasses) {
+        throw new ApiValidationError(
+          `Plan basic permite hasta ${this.basicPlanMaxReservedClasses} clases reservadas a futuro`,
+          403
+        );
+      }
+    }
+
     const { updatedClass: updated } = await BookingService.createBookingFromEnroll(
       userId,
       classId,
