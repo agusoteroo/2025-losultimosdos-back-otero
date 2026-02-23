@@ -12,6 +12,7 @@
     "docker:stop": "docker-compose down",
     "test": "jest --runInBand --watchman=false",
     "seed": "ts-node prisma/seed.ts",
+    "seed:demo": "ts-node prisma/seed-demo.ts",
     "seed:mock": "ts-node prisma/seed-mock-data.ts",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
