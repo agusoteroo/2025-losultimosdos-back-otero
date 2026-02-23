@@ -127,15 +127,47 @@ class ClassService {
     );
   }
 
+  async getActiveClassesByUserId(userId: string, sedeId?: number) {
+    return this.prisma.class.findMany({
+      where: {
+        ...(typeof sedeId === "number" ? { sedeId } : {}),
+        bookings: {
+          some: {
+            userId,
+            status: {
+              in: [
+                BookingStatus.RESERVED,
+                BookingStatus.ATTENDED,
+                BookingStatus.ABSENT,
+              ],
+            },
+          },
+        },
+      },
+      orderBy: [{ date: "asc" }, { time: "asc" }],
+    });
+  }
+
   private async getFutureClassCount(userId: string): Promise<number> {
-    const classes = await this.prisma.booking.count({
+    const now = new Date();
+    const bookings = await this.prisma.booking.findMany({
       where: {
         userId,
-        status: "RESERVED",
-        class: { date: { gte: new Date() } },
+        status: BookingStatus.RESERVED,
+        class: { date: { gte: this.startOfDay(now) } },
+      },
+      include: {
+        class: {
+          select: {
+            date: true,
+            time: true,
+          },
+        },
       },
     });
-    return classes;
+
+    return bookings.filter((booking) => this.getClassDateTime(booking.class) >= now)
+      .length;
   }
 
   async createClass(classData: Omit<Class, "id" | "users" | "enrolled">) {
@@ -181,7 +213,7 @@ class ClassService {
     }
   }
   async unenrollClass(userId: string, classId: number) {
-    const { updatedClass: updated, promotionAlert } =
+    const { updatedClass: updated, promotionAlert, strikeAlert } =
       await BookingService.cancelBookingFromUnenroll(
       userId,
       classId,
@@ -196,7 +228,7 @@ class ClassService {
     } catch {
       // noop
     }
-    return { updated, promotionAlert };
+    return { updated, promotionAlert, strikeAlert };
   }
   async listNamesWithEnrollCount(
     upcoming = false,
