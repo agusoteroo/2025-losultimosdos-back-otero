@@ -41,8 +41,7 @@ const validateApiKey = async (
 
     next();
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    console.error("Error validating API key:", { message });
+    console.error("Error validating API key:", error);
     return res.status(500).json({ error: "Internal server error" });
   }
 };
