@@ -27,6 +27,54 @@ import ExercisePerformanceService from "./services/exercisePerformance.service";
 const prisma = new PrismaClient();
 const app = express();
 
+const sanitizeForLogging = (value: unknown): unknown => {
+  const sensitiveExact = new Set([
+    "authorization",
+    "cookie",
+    "set-cookie",
+    "x-api-key",
+    "apikey",
+    "x-auth-token",
+    "password",
+    "token",
+    "refreshToken",
+    "secret",
+    "clientSecret",
+    "accessToken",
+  ].map((k) => k.toLowerCase()));
+
+  const seen = new WeakSet<object>();
+
+  const walk = (input: unknown, depth = 0): unknown => {
+    if (input === null || input === undefined) return input;
+    if (typeof input !== "object") return input;
+    if (depth > 5) return "[MaxDepth]";
+
+    if (seen.has(input as object)) return "[Circular]";
+    seen.add(input as object);
+
+    if (Array.isArray(input)) return input.map((v) => walk(v, depth + 1));
+
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+      const lower = k.toLowerCase();
+      if (
+        sensitiveExact.has(lower) ||
+        lower.includes("token") ||
+        lower.includes("secret") ||
+        lower.includes("password")
+      ) {
+        out[k] = "[REDACTED]";
+      } else {
+        out[k] = walk(v, depth + 1);
+      }
+    }
+    return out;
+  };
+
+  return walk(value);
+};
+
 const checkIsAuthenticated = async (
   req: Request,
   res: Response,
@@ -353,14 +401,23 @@ app.get(
 );
 
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+  const isProd = process.env.NODE_ENV === "production";
+  const sanitizedHeaders = { ...req.headers } as Record<string, unknown>;
+  for (const key of ["authorization", "cookie", "x-api-key"]) {
+    if (key in sanitizedHeaders) {
+      sanitizedHeaders[key] = "[REDACTED]";
+    }
+  }
+
   console.error("[Error Handler]", {
     error: err.message,
-    stack: err.stack,
+    stack: isProd ? undefined : err.stack,
     path: req.path,
     method: req.method,
-    headers: req.headers,
-    query: req.query,
-    body: req.body,
+    headers: sanitizedHeaders,
+    query: sanitizeForLogging(req.query),
+    params: sanitizeForLogging(req.params),
+    body: sanitizeForLogging(req.body),
   });
 
   if (err instanceof ApiValidationError) {

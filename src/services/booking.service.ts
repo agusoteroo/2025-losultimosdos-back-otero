@@ -156,8 +156,11 @@ class BookingService {
 
       if (
         existing &&
-        [BookingStatus.RESERVED, BookingStatus.ATTENDED, BookingStatus.ABSENT, BookingStatus.WAITLIST].includes(
-          existing.status
+        (
+          existing.status === BookingStatus.RESERVED ||
+          existing.status === BookingStatus.ATTENDED ||
+          existing.status === BookingStatus.ABSENT ||
+          existing.status === BookingStatus.WAITLIST
         )
       ) {
         throw new ApiValidationError("Already enrolled in this class", 400);
@@ -383,8 +386,11 @@ class BookingService {
     });
     if (
       existingBooking &&
-      [BookingStatus.RESERVED, BookingStatus.ATTENDED, BookingStatus.ABSENT, BookingStatus.WAITLIST].includes(
-        existingBooking.status
+      (
+        existingBooking.status === BookingStatus.RESERVED ||
+        existingBooking.status === BookingStatus.ATTENDED ||
+        existingBooking.status === BookingStatus.ABSENT ||
+        existingBooking.status === BookingStatus.WAITLIST
       )
     ) {
       throw new ApiValidationError("Ya tenés una reserva para esta clase", 400);
@@ -604,7 +610,7 @@ class BookingService {
   }
 
   async updateAttendanceStatusByAdmin(bookingId: number, status: BookingStatus) {
-    if (![BookingStatus.ATTENDED, BookingStatus.ABSENT].includes(status)) {
+    if (status !== BookingStatus.ATTENDED && status !== BookingStatus.ABSENT) {
       throw new ApiValidationError(
         "Solo se puede registrar ATTENDED o ABSENT en la toma de asistencia",
         400
@@ -645,7 +651,7 @@ class BookingService {
         include: { class: true },
       });
 
-      if (status === BookingStatus.ABSENT && booking.status !== BookingStatus.ABSENT) {
+      if (status === BookingStatus.ABSENT) {
         await this.increaseNoShowCounter(booking.userId, updated.updatedAt, tx);
       }
 
